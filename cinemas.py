@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import argparse
+import sys
 
 
 URL_AFISHA_PAGE = 'http://www.afisha.ru/msk/schedule_cinema/'
@@ -22,49 +23,52 @@ def create_parser():
 
 
 def fetch_site_page(url, payload=None):
-    response = requests.get(url, params=payload)
+    try:
+        response = requests.get(url, params=payload, timeout=(10, 10))
+    except requests.exceptions.RequestException:
+        return None
     response.encoding = 'utf-8'
-    page = response.text
-    return BeautifulSoup(page, 'lxml')
+    return response.text
 
 
-def parse_afisha_list(soup):
+def parse_afisha_list(page):
+    soup = BeautifulSoup(page, 'lxml')
     movies = []
-    if soup:
-        movies_and_cinemas = \
-            soup.findAll(
-                         'div',
-                         {'class': 'object s-votes-hover-area collapsed'}
-                         )
-        for movie_and_cinemas in movies_and_cinemas:
-            movie = movie_and_cinemas.find('h3', {'class': 'usetags'}).text
-            cinemas_count = \
-                len(movie_and_cinemas.findAll('td', {'class': 'b-td-item'}))
-            movies.append({'movie': movie, 'cinemas_count': cinemas_count})
+    movies_and_cinemas = \
+        soup.findAll(
+                     'div',
+                     {'class': 'object s-votes-hover-area collapsed'}
+                     )
+    for movie_and_cinemas in movies_and_cinemas:
+        movie = movie_and_cinemas.find('h3', {'class': 'usetags'}).text
+        cinemas_count = \
+            len(movie_and_cinemas.findAll('td', {'class': 'b-td-item'}))
+        movies.append({'movie': movie, 'cinemas_count': cinemas_count})
     return movies
 
 
-def fetch_movie_info(soup):
-    rating = 0
-    voices = 0
-    if soup:
-        element_most_wanted = \
-            soup.find('div', {'class': 'element most_wanted'})
-        if element_most_wanted:
-            elem_rating_and_voices = \
-                element_most_wanted.find(
-                                         'div',
-                                         {'class': re.compile(r'rating .*')}
-                                         )
-            if elem_rating_and_voices:
-                rating_and_voices = elem_rating_and_voices.get('title')
-                rating = elem_rating_and_voices.text
-                voices = re.search(
-                                   r'(?<= \().*(?=\))',
-                                   rating_and_voices
-                                   ).group()
-                voices = voices.replace(' ', '')
-    return {'rating': rating, 'voices': voices}
+def fetch_movie_info(page):
+    if page is None:
+        return {'rating': 0, 'voices': 0}
+    soup = BeautifulSoup(page, 'lxml')
+    element_most_wanted = \
+        soup.find('div', {'class': 'element most_wanted'})
+    if element_most_wanted:
+        elem_rating_and_voices = \
+            element_most_wanted.find(
+                                     'div',
+                                     {'class': re.compile(r'rating .*')}
+                                     )
+        if elem_rating_and_voices:
+            rating_and_voices = elem_rating_and_voices.get('title')
+            rating = elem_rating_and_voices.text
+            voices = re.search(
+                               r'(?<= \().*(?=\))',
+                               rating_and_voices
+                               ).group()
+            voices = voices.replace(' ', '')
+            return {'rating': rating, 'voices': voices}
+    return {'rating': 0, 'voices': 0}
 
 
 def output_movies_to_console(movies, top_size=10, cinemas_over=None):
@@ -84,8 +88,11 @@ def output_movies_to_console(movies, top_size=10, cinemas_over=None):
 if __name__ == '__main__':
     parser = create_parser()
     namespace = parser.parse_args()
-    afisha_soup = fetch_site_page(url=URL_AFISHA_PAGE)
-    movies = parse_afisha_list(afisha_soup)
+    afisha_page = fetch_site_page(url=URL_AFISHA_PAGE)
+    if afisha_page is None:
+        print('%s недоступен.' % URL_AFISHA_PAGE)
+        sys.exit(1)
+    movies = parse_afisha_list(afisha_page)
     for movie in movies:
         movie.update(fetch_movie_info(
            fetch_site_page(url=URL_KINOPOISK_SEARCH,
