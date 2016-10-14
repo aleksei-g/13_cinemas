@@ -3,16 +3,18 @@ from bs4 import BeautifulSoup
 import re
 import argparse
 import sys
+from multiprocessing import Pool
 
 
 URL_AFISHA_PAGE = 'http://www.afisha.ru/msk/schedule_cinema/'
 URL_KINOPOISK_SEARCH = 'https://www.kinopoisk.ru/index.php'
+POOL_COUNT = 4
 
 
 def create_parser():
-    parser = argparse.ArgumentParser(description='Скрипт выводит самые \
+    parser = argparse.ArgumentParser(description="Скрипт выводит самые \
                                      популярные фильмы, идущие в данный \
-                                     момент, отсортированные по рейтингу.')
+                                     момент, отсортированные по рейтингу.")
     parser.add_argument('-t', '--top', metavar='ТОП', type=int, default=10,
                         help='Размер топ-списка фильмов.')
     parser.add_argument('-c', '--cinemas', metavar='КИРОТЕАТРЫ', type=int,
@@ -71,6 +73,21 @@ def fetch_movie_info(page):
     return {'rating': 0, 'voices': 0}
 
 
+def get_movie_rating(movie):
+    movie.update(fetch_movie_info(
+        fetch_site_page(url=URL_KINOPOISK_SEARCH,
+                        payload={'kp_query': movie['movie']})))
+    return movie
+
+
+def update_movies_info_from_kinopoisk(movies):
+    pool = Pool(POOL_COUNT)
+    movies = pool.map(get_movie_rating, movies)
+    pool.close()
+    pool.join()
+    return movies
+
+
 def output_movies_to_console(movies, top_size=10, cinemas_over=None):
     movies.sort(key=lambda d: float(d['rating']), reverse=True)
     if cinemas_over:
@@ -93,8 +110,5 @@ if __name__ == '__main__':
         print('%s недоступен.' % URL_AFISHA_PAGE)
         sys.exit(1)
     movies = parse_afisha_list(afisha_page)
-    for movie in movies:
-        movie.update(fetch_movie_info(
-           fetch_site_page(url=URL_KINOPOISK_SEARCH,
-                           payload={'kp_query': movie['movie']})))
+    movies = update_movies_info_from_kinopoisk(movies)
     output_movies_to_console(movies, namespace.top, namespace.cinemas)
