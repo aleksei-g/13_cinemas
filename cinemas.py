@@ -29,7 +29,6 @@ def fetch_site_page(url, payload=None):
         response = requests.get(url, params=payload, timeout=(10, 10))
     except requests.exceptions.RequestException:
         return None
-    response.encoding = 'utf-8'
     return response.text
 
 
@@ -45,44 +44,50 @@ def parse_afisha_list(page):
         movie = movie_and_cinemas.find('h3', {'class': 'usetags'}).text
         cinemas_count = \
             len(movie_and_cinemas.findAll('td', {'class': 'b-td-item'}))
-        movies.append({'movie': movie, 'cinemas_count': cinemas_count})
+        movies.append([movie, cinemas_count])
     return movies
 
 
 def fetch_movie_info(page):
-    if page is None:
-        return {'rating': 0, 'voices': 0}
     soup = BeautifulSoup(page, 'lxml')
     element_most_wanted = \
         soup.find('div', {'class': 'element most_wanted'})
-    if element_most_wanted:
-        elem_rating_and_voices = \
-            element_most_wanted.find(
-                                     'div',
-                                     {'class': re.compile(r'rating .*')}
-                                     )
-        if elem_rating_and_voices:
-            rating_and_voices = elem_rating_and_voices.get('title')
-            rating = elem_rating_and_voices.text
-            voices = re.search(
-                               r'(?<= \().*(?=\))',
-                               rating_and_voices
-                               ).group()
-            voices = voices.replace(' ', '')
-            return {'rating': rating, 'voices': voices}
-    return {'rating': 0, 'voices': 0}
+    if not element_most_wanted:
+        return None
+    elem_rating_and_voices = \
+        element_most_wanted.find('div', {'class': re.compile(r'rating .*')})
+    if not elem_rating_and_voices:
+        return None
+    rating_and_voices = elem_rating_and_voices.get('title')
+    rating = elem_rating_and_voices.text
+    voices = re.search(r'(?<= \().*(?=\))', rating_and_voices).group()
+    voices = voices.replace(' ', '')
+    return [rating,  voices]
 
 
 def get_movie_rating(movie):
-    movie.update(fetch_movie_info(
-        fetch_site_page(url=URL_KINOPOISK_SEARCH,
-                        payload={'kp_query': movie['movie']})))
-    return movie
+    kinopoisk_page = fetch_site_page(url=URL_KINOPOISK_SEARCH,
+                                     payload={'kp_query': movie})
+    if not kinopoisk_page:
+        return [0, 0]
+    movie_rating = fetch_movie_info(kinopoisk_page)
+    if not movie_rating:
+        return [0, 0]
+    return movie_rating
+
+
+def update_movie_info_from_kinopoisk(movie):
+    movie_rating = get_movie_rating(movie[0])
+    return {'movie': movie[0],
+            'cinemas_count': movie[1],
+            'rating': movie_rating[0],
+            'voices': movie_rating[1]
+            }
 
 
 def update_movies_info_from_kinopoisk(movies):
     pool = Pool(POOL_COUNT)
-    movies = pool.map(get_movie_rating, movies)
+    movies = pool.map(update_movie_info_from_kinopoisk, movies)
     pool.close()
     pool.join()
     return movies
